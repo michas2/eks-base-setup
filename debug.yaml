@@ -1,0 +1,108 @@
+############################################################
+# create a simple echoserver and expose it in various ways
+############################################################
+
+# deploy your application
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: echo-deployment
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: echo-pod
+  template:
+    metadata:
+      labels:
+        app: echo-pod
+    spec:
+      containers:
+      - name: echoheaders
+        image: k8s.gcr.io/echoserver:1.10
+        ports:
+        - containerPort: 8080
+
+# create an internal service targeting the pods above
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: echo-service
+spec:
+  selector:
+    app: echo-pod
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+
+# a regual ingress matching the hostname to the service
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: debug
+spec:
+  rules:
+    - host: debug-none.eks.example.com
+      http:
+        paths:
+        - path: /
+          pathType: Prefix
+          backend:
+            service:
+              name: echo-service
+              port:
+                name: http
+
+###################################################################
+# the regular exposure above should be perfectly fine in most cases
+# of course you are still free to use other ways of exposure
+
+# by using a loadbalancer service to specify your options
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: echo-service-lb
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-backend-protocol: http
+    service.beta.kubernetes.io/aws-load-balancer-ssl-cert: arn:aws:acm:eu-north-1:xxx:certificate/xxx
+    external-dns.alpha.kubernetes.io/hostname: debug-nlb.eks.example.com
+    service.beta.kubernetes.io/aws-load-balancer-type: nlb
+spec:
+  selector:
+    app: echo-pod
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+  type: LoadBalancer
+
+# by explicitly creating a new alb to specify your own options
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: debug-alb
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS":443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:eu-north-1:xxx:certificate/xxx"
+    alb.ingress.kubernetes.io/target-type: "ip"
+spec:
+  ingressClassName: alb
+  rules:
+    - host: debug-alb.eks.example.com
+      http:
+        paths:
+        - path: /
+          pathType: Prefix
+          backend:
+            service:
+              name: echo-service
+              port:
+                name: http
